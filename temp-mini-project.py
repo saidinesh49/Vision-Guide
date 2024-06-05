@@ -1,10 +1,9 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
-import supervision as sv
 import pyttsx3
 import sqlite3
-import os #Working Original ( User options + detection features ) V2
+import os
 
 # Initialize YOLO for object detection
 model = YOLO("yolov8l.pt")
@@ -29,27 +28,47 @@ def get_profile(id):
     conn.close()
     return profile
 
+# Function to check if a person exists in the database by name
+def person_exists(name):
+    conn = sqlite3.connect("Face-Recognition/sqlite.db")
+    cursor = conn.execute("SELECT * FROM STUDENTS WHERE NAME=?", (name,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
+# Function to draw button on the frame
 def draw_button(frame, text, position, size=(200, 50)):
     (x, y) = position
     (w, h) = size
     cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), -1)
     cv2.putText(frame, text, (x + 10, y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
+# Function to check if a button is clicked
 def check_button_click(position, size, mouse_pos):
     (x, y) = position
     (w, h) = size
     (mx, my) = mouse_pos
     return x <= mx <= x + w and y <= my <= y + h
 
+# Function to estimate distance
+def estimate_distance(box):
+    x1, y1, x2, y2 = box
+    pixel_height = y2 - y1
+    # Camera parameters (example values, should be calibrated)
+    known_height = 1.7  # average human height in meters
+    focal_length = 700  # example focal length in pixels
+    distance = (known_height * focal_length) / pixel_height
+    return distance
+
+# Function to read environment and detect objects
 def environment_read():
     cam = cv2.VideoCapture(0)
-    global button_clicked
     button_clicked = False
     
     def on_mouse(event, x, y, flags, param):
-        global button_clicked
+        nonlocal button_clicked
         if event == cv2.EVENT_LBUTTONDOWN:
-            if check_button_click((10, 10), (100, 40), (x, y)):
+            if check_button_click((10, 10), (200, 50), (x, y)):
                 button_clicked = True
 
     cv2.namedWindow("Environment Read")
@@ -57,48 +76,52 @@ def environment_read():
 
     while True:
         ret, frame = cam.read()
-        for result in model.track(source=frame, stream=True):
-            frame = result.orig_img
-            detections = sv.Detections.from_yolov8(result)
+        if not ret:
+            continue
+        
+        results = model(frame)
+        detections = results[0].boxes
 
-            for _, confidence, class_id, _ in detections:
-                class_name = model.model.names[class_id]
+        for box in detections:
+            conf = box.conf[0]
+            cls = int(box.cls[0])
+            xyxy = box.xyxy[0]
 
-                if class_name == 'person':
+            if conf > 0.5:
+                label = f'{model.names[cls]} {conf:.2f}'
+                x1, y1, x2, y2 = map(int, xyxy)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                if model.names[cls] == 'person':
                     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
                     for (x, y, w, h) in faces:
-                        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                        id, conf = recognizer.predict(gray[y:y + h, x:x + w])
+                        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                        id, confidence = recognizer.predict(gray[y:y + h, x:x + w])
                         profile = get_profile(id)
-
                         if profile is not None:
-                            speech = f"Hey {profile[1]}"
-                            engine.say(speech)
+                            cv2.putText(frame, str(profile[1]), (x, y + h + 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                            engine.say(str(profile[1]))
                             engine.runAndWait()
-                            cv2.putText(frame, "Name:" + str(profile[1]), (x, y + h + 20), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 127), 2)
                         else:
-                            print("Detected object:", class_name, "with confidence:", confidence)
-                            speech_text = f"Detected object: {class_name}"
-                            engine.say(speech_text)
-                            engine.runAndWait()
-
+                            cv2.putText(frame, "Unknown", (x, y + h + 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                            engine.say(str("Person"))
                 else:
-                    print("Detected object:", class_name, "with confidence:", confidence)
-                    speech_text = f"Detected object: {class_name}"
-                    engine.say(speech_text)
-                    engine.runAndWait()
+                    engine.say(model.names[cls])
 
-            draw_button(frame, "Back", (10, 10), (100, 40))
-            cv2.imshow("Environment Read", frame)
+        engine.runAndWait()
+        draw_button(frame, "Back", (10, 10), (200, 50))
+        cv2.imshow("Environment Read", frame)
 
-            if cv2.waitKey(1) & 0xFF == 27 or button_clicked:  # Press 'ESC' to quit or 'Back' button clicked
-                break
+        if cv2.waitKey(1) & 0xFF == 27 or button_clicked:  # Press 'ESC' to quit or 'Back' button clicked
+            break
 
     cam.release()
     cv2.destroyAllWindows()
 
+# Function to add a person
 def add_person():
     face_detect = cv2.CascadeClassifier('Face-Recognition/haarcascade_frontalface_default.xml')
     cam = cv2.VideoCapture(0)
@@ -114,7 +137,7 @@ def add_person():
             conn.execute("UPDATE STUDENTS SET NAME=?, AGE=? WHERE ID=?", (name, age, id))
         else:
             conn.execute("INSERT INTO STUDENTS (ID, NAME, AGE) values (?, ?, ?)", (id, name, age))
-            speech=f"{name} was added successfully"
+            speech = f"{name} was added successfully"
             engine.say(speech)
             engine.runAndWait()
         conn.commit()
@@ -133,7 +156,7 @@ def add_person():
     def on_mouse(event, x, y, flags, param):
         global button_clicked
         if event == cv2.EVENT_LBUTTONDOWN:
-            if check_button_click((10, 10), (100, 40), (x, y)):
+            if check_button_click((10, 10), (200, 50), (x, y)):
                 button_clicked = True
 
     cv2.namedWindow("Add Person")
@@ -148,7 +171,7 @@ def add_person():
             cv2.imwrite(f"Face-Recognition/dataset/user.{id}.{sample_num}.jpg", gray[y:y + h, x:x + w])
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.waitKey(100)
-        draw_button(img, "Back", (10, 10), (100, 40))
+        draw_button(img, "Back", (10, 10), (200, 50))
         cv2.imshow("Add Person", img)
         if cv2.waitKey(1) & 0xFF == 27 or button_clicked:  # Press 'ESC' or 'Back' button to quit
             break
@@ -180,6 +203,7 @@ def add_person():
     recognizer.save("Face-Recognition/recognizer/trainingdata.yml")
     cv2.destroyAllWindows()
 
+# Function to remove a person
 def remove_face():
     conn = sqlite3.connect("Face-Recognition/sqlite.db")
     cursor = conn.cursor()
@@ -192,66 +216,129 @@ def remove_face():
             cursor.execute("DELETE FROM STUDENTS WHERE ID=?", (id,))
             # Remove images from dataset
             dataset_path = "Face-Recognition/dataset"
-            images = [f for f in os.listdir(dataset_path) if f.startswith(f"user.{id}.")]
-            for image in images:
-                os.remove(os.path.join(dataset_path, image))
-        conn.commit()
-        speech=f"{name} removed successfully"
+            for file in os.listdir(dataset_path):
+                if file.startswith(f"user.{id}."):
+                    os.remove(os.path.join(dataset_path, file))
+            conn.commit()
+            print(f"Removed {name} from the database.")
+            speech = f"{name} was removed successfully"
+            engine.say(speech)
+            engine.runAndWait()
+    else:
+        print(f"No person named {name} found in the database.")
+        speech = f"No person named {name} found in the database"
         engine.say(speech)
         engine.runAndWait()
-        print(f"Removed all data for {name}.")
-    else:
-        print(f"No record found for {name}.")
     conn.close()
 
-def main():
+# Function to navigate to a person
+def navigate_to_person(name):
+    if not person_exists(name):
+        print(f"No person found with the name {name}.")
+        engine.say(f"No person found with the name {name}.")
+        engine.runAndWait()
+        return
+
     cam = cv2.VideoCapture(0)
-    cv2.namedWindow("Options")
-
-    def on_mouse(event, x, y, flags, param):
-        global button_clicked
-        if event == cv2.EVENT_LBUTTONDOWN:
-            if check_button_click((50, 50), (200, 50), (x, y)):
-                button_clicked = "environment_read"
-            elif check_button_click((50, 150), (200, 50), (x, y)):
-                button_clicked = "add_person"
-            elif check_button_click((50, 250), (200, 50), (x, y)):
-                button_clicked = "navigate_me"
-            elif check_button_click((50, 350), (200, 50), (x, y)):
-                button_clicked = "remove_face"
-
-    cv2.setMouseCallback("Options", on_mouse)
-    global button_clicked
-    button_clicked = None
-
+    
     while True:
         ret, frame = cam.read()
-        # Remove the black background, use the camera feed as the background
-        # frame[:] = (0, 0, 0)
-        draw_button(frame, "Environment Read", (50, 50))
-        draw_button(frame, "Add Person", (50, 150))
-        draw_button(frame, "Navigate Me", (50, 250))
-        draw_button(frame, "Remove Face", (50, 350))
+        if not ret:
+            continue
+        
+        results = model(frame)
+        detections = results[0].boxes
 
-        if button_clicked == "environment_read":
-            environment_read()
-            button_clicked = None
-        elif button_clicked == "add_person":
-            add_person()
-            button_clicked = None
-        elif button_clicked == "navigate_me":
-            print("Navigate Me functionality not yet implemented.")
-            button_clicked = None
-        elif button_clicked == "remove_face":
-            remove_face()
-            button_clicked = None
+        target_coordinates = None
+        for box in detections:
+            conf = box.conf[0]
+            cls = int(box.cls[0])
+            xyxy = box.xyxy[0]
 
-        cv2.imshow("Options", frame)
+            if conf > 0.5 and model.names[cls] == 'person':
+                x1, y1, x2, y2 = map(int, xyxy)
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+                for (x, y, w, h) in faces:
+                    id, confidence = recognizer.predict(gray[y:y + h, x:x + w])
+                    profile = get_profile(id)
+                    if profile is not None and profile[1] == name:
+                        target_coordinates = (x, y, w, h)
+                        distance = estimate_distance((x, y, x + w, y + h))
+                        cv2.putText(frame, f"Distance: {distance:.2f}m", (x1, y1 - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                        break
+
+        if target_coordinates:
+            x, y, w, h = target_coordinates
+            distance = estimate_distance((x, y, x + w, y + h))
+            if distance < 5.0:
+                engine.say(f"You have reached {name}.")
+                engine.runAndWait()
+                break
+            else:
+                direction = "left" if x < frame.shape[1] // 2 else "right"
+                engine.say(f"Move {direction} and forward. Distance to {name} is {distance:.2f} meters.")
+                engine.runAndWait()
+        else:
+            engine.say(f"Searching for {name}.")
+            engine.runAndWait()
+
+        draw_button(frame, "Back", (10, 10), (200, 50))
+        cv2.imshow("Navigate to Person", frame)
 
         if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to quit
             break
 
     cam.release()
+    cv2.destroyAllWindows()
+
+# Main function
+def main():
+    global button_clicked
+    button_clicked = False
+    
+    def on_mouse(event, x, y, flags, param):
+        global button_clicked
+        if event == cv2.EVENT_LBUTTONDOWN:
+            if check_button_click((10, 10), (200, 50), (x, y)):
+                button_clicked = "environment_read"
+            elif check_button_click((10, 70), (200, 50), (x, y)):
+                button_clicked = "add_person"
+            elif check_button_click((10, 130), (200, 50), (x, y)):
+                button_clicked = "remove_face"
+            elif check_button_click((10, 190), (200, 50), (x, y)):
+                button_clicked = "navigate_to_person"
+
+    cv2.namedWindow("Main Menu")
+    cv2.setMouseCallback("Main Menu", on_mouse)
+
+    while True:
+        frame = np.zeros((400, 400, 3), np.uint8)
+        draw_button(frame, "Read Environment", (10, 10), (200, 50))
+        draw_button(frame, "Add Person", (10, 70), (200, 50))
+        draw_button(frame, "Remove Person", (10, 130), (200, 50))
+        draw_button(frame, "Navigate to Person", (10, 190), (200, 50))
+        cv2.imshow("Main Menu", frame)
+
+        if cv2.waitKey(1) & 0xFF == 27 or button_clicked:
+            break
+
+    if button_clicked == "environment_read":
+        environment_read()
+    elif button_clicked == "add_person":
+        add_person()
+    elif button_clicked == "remove_face":
+        remove_face()
+    elif button_clicked == "navigate_to_person":
+        target_name = input("Enter the name of the person to navigate to: ")
+        if person_exists(target_name):
+            navigate_to_person(target_name)
+        else:
+            print(f"No person named {target_name} found in the database.")
+            speech = f"No person named {target_name} found in the database"
+            engine.say(speech)
+            engine.runAndWait()
+
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":

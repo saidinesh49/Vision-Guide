@@ -271,8 +271,7 @@ def navigate_to_person(name):
         if target_coordinates:
             x, y, w, h = target_coordinates
             distance = estimate_distance((x, y, x + w, y + h))
-            if distance < 6.0:
-                print("Reached ",name)
+            if distance < 5.0:
                 engine.say(f"You have reached {name}.")
                 engine.runAndWait()
                 break

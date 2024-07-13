@@ -100,7 +100,7 @@ def environment_read():
             conf = box.conf[0]
             cls = int(box.cls[0])
             xyxy = box.xyxy[0]
-
+ 
             if conf > 0.5:
                 label = f'{model.names[cls]} {conf:.2f}'
                 x1, y1, x2, y2 = map(int, xyxy)

@@ -5,20 +5,15 @@ import pyttsx3
 import sqlite3
 import os
 
-# Initialize YOLO for object detection
 model = YOLO("yolov8l.pt")
 
-# Initialize face recognizer
 recognizer = cv2.face.LBPHFaceRecognizer_create()
 recognizer.read("Face-Recognition/recognizer/trainingdata.yml")
 
-# Load Haar Cascade for face detection
 face_cascade = cv2.CascadeClassifier('Face-Recognition/haarcascade_frontalface_default.xml')
 
-# Initialize text-to-speech engine
 engine = pyttsx3.init()
 
-# Function to get profile from database
 def get_profile(id):
     conn = sqlite3.connect("Face-Recognition/sqlite.db")
     cursor = conn.execute("SELECT * FROM STUDENTS WHERE id=?", (id,))
@@ -28,7 +23,6 @@ def get_profile(id):
     conn.close()
     return profile
 
-# Function to check if a person exists in the database by name
 def person_exists(name):
     conn = sqlite3.connect("Face-Recognition/sqlite.db")
     cursor = conn.execute("SELECT * FROM STUDENTS WHERE NAME=?", (name.upper(),))
@@ -36,44 +30,35 @@ def person_exists(name):
     conn.close()
     return exists
 
-# Function to draw button on the frame
 def draw_button(frame, text, position, size=(200, 50), padding=10, color="#C509EB"):
     (x, y) = position
     (w, h) = size
     
-    # Get text size
     text_size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
     
-    # Calculate button size based on text size and padding
     button_width = max(text_size[0] + 2 * padding, w)
     button_height = max(text_size[1] + 2 * padding, h)
     
-    # Adjust text position to center it within the button
     text_x = x + (button_width - text_size[0]) // 2
     text_y = y + (button_height + text_size[1]) // 2
     
-    # Draw the rounded rectangle for the button
     cv2.rectangle(frame, (x, y), (x + button_width, y + button_height), (175, 9, 235), -1)
     cv2.rectangle(frame, (x, y), (x + button_width, y + button_height), (0, 0, 0), 2)  # Black border
     
-    # Draw the text on the button
     cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-# Function to check if a button is clicked
 def check_button_click(position, size, mouse_pos):
     (x, y) = position
     (w, h) = size
     (mx, my) = mouse_pos
     return x <= mx <= x + w and y <= my <= y + h
 
-# Function to estimate distance
 def estimate_distance(box, real_height=1.7, focal_length=700):
     x1, y1, x2, y2 = box
     pixel_height = y2 - y1
     distance = (real_height * focal_length) / pixel_height
     return distance
 
-# Function to read environment and detect objects
 def environment_read():
     cam = cv2.VideoCapture(0)
     button_clicked = False
@@ -84,7 +69,7 @@ def environment_read():
             if check_button_click((10, 10), (200, 50), (x, y)):
                 button_clicked = True
     
-    cv2.namedWindow("Environment Read", cv2.WINDOW_NORMAL)  # Added WINDOW_NORMAL for resizing
+    cv2.namedWindow("Environment Read", cv2.WINDOW_NORMAL) 
     cv2.setMouseCallback("Environment Read", on_mouse)
     
     while True:
@@ -137,12 +122,11 @@ def environment_read():
         draw_button(frame, "Back", (10, 10), (200, 50))
         cv2.imshow("Environment Read", frame)
     
-        if cv2.waitKey(1) & 0xFF == 27 or button_clicked:  # Press 'ESC' to quit or 'Back' button clicked
+        if cv2.waitKey(1) & 0xFF == 27 or button_clicked:  
             revokeMainfun()
             break
 
 
-# Function to add a person
 def add_person():
     face_detect = cv2.CascadeClassifier('Face-Recognition/haarcascade_frontalface_default.xml')
     cam = cv2.VideoCapture(0)
@@ -194,7 +178,7 @@ def add_person():
             cv2.waitKey(100)
         draw_button(img, "Back", (10, 10), (200, 50))
         cv2.imshow("Add Person", img)
-        if cv2.waitKey(1) & 0xFF == 27 or button_clicked:  # Press 'ESC' or 'Back' button to quit
+        if cv2.waitKey(1) & 0xFF == 27 or button_clicked: 
             break
         if sample_num > 20:
             break
@@ -202,7 +186,6 @@ def add_person():
     cam.release()
     cv2.destroyAllWindows()
 
-    # Train the model with new data
     recognizer = cv2.face.LBPHFaceRecognizer_create()
     path = "Face-Recognition/dataset"
 
@@ -225,7 +208,6 @@ def add_person():
     cv2.destroyAllWindows()
     main()
 
-# Function to remove a person
 def remove_face():
     conn = sqlite3.connect("Face-Recognition/sqlite.db")
     cursor = conn.cursor()
@@ -236,7 +218,6 @@ def remove_face():
         for row in rows:
             id = row[0]
             cursor.execute("DELETE FROM STUDENTS WHERE ID=?", (id,))
-            # Remove images from dataset
             dataset_path = "Face-Recognition/dataset"
             for file in os.listdir(dataset_path):
                 if file.startswith(f"user.{id}."):
@@ -261,7 +242,6 @@ def revokeMainfun():
     main()
     return 
 
-# Function to navigate to a person
 def navigate_to_person(name):
     if not person_exists(name):
         print(f"No person found with the name {name}.")
@@ -304,7 +284,7 @@ def navigate_to_person(name):
             object_center_x = x + w // 2
             direction = ""
 
-            if distance <= 11:  # If the distance is 1.1 meters or less
+            if distance <= 11:  
                 direction = f"You have succesfully reached {name}."
                 engine.say(direction)
                 engine.runAndWait()
@@ -330,13 +310,12 @@ def navigate_to_person(name):
 
         cv2.imshow("Navigate to Person", frame)
 
-        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to quit
+        if cv2.waitKey(1) & 0xFF == 27:  
             break
 
     cam.release()
     cv2.destroyAllWindows()
 
-# Main function
 def main():
     global button_clicked
     button_clicked = False
@@ -391,3 +370,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+#Basic Version (V - 1.2)
